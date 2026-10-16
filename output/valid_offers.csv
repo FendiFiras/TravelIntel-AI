@@ -1,0 +1,5 @@
+offer_id,provider,country,data_gb,validity_days,price_eur
+OFF001,TravelConnect,Japan,5,7,8.99
+OFF002,GlobeLink,France,10,30,12.50
+OFF003,TravelConnect,Thailand,20,15,15.00
+OFF009,TravelConnect,Canada,15,30,22.00

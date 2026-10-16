@@ -1,0 +1,6 @@
+offer_id,provider,country,data_gb,validity_days,price_eur,errors
+OFF004,GlobeLink,Japan,0,7,5.99,data_gb must be greater than zero
+OFF005,TravelConnect,,5,7,7.99,Missing required field: country
+OFF006,GlobeLink,Spain,10,30,-3.00,price_eur must be greater than zero
+OFF007,TravelConnect,Japan,5,7,8.99,Duplicate commercial offer
+OFF008,GlobeLink,Italy,3,0,4.50,validity_days must be greater than zero
