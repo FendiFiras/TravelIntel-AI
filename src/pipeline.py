@@ -115,7 +115,93 @@ def write_csv(file_path, rows, fieldnames):
 # 5. Run the data pipeline
 # --------------------------------------------------
 
-def run_pipeline():
+
+def run_pipeline(
+    input_file=INPUT_FILE,
+    valid_file=VALID_FILE,
+    rejected_file=REJECTED_FILE,
+):
+    """Read, validate, deduplicate, and export supplier offers."""
+
+    input_file = Path(input_file)
+    valid_file = Path(valid_file)
+    rejected_file = Path(rejected_file)
+
+    # Handle missing input files clearly.
+    if not input_file.exists():
+        raise FileNotFoundError(
+            f"Input CSV file not found: {input_file}"
+        )
+
+    # Create output folders if necessary.
+    valid_file.parent.mkdir(parents=True, exist_ok=True)
+    rejected_file.parent.mkdir(parents=True, exist_ok=True)
+
+    valid_offers = []
+    rejected_offers = []
+    seen_offers = set()
+    seen_ids = set()
+    rows_processed = 0
+
+    with input_file.open(
+        "r",
+        newline="",
+        encoding="utf-8-sig",
+    ) as file:
+        reader = csv.DictReader(file)
+
+        if not reader.fieldnames or not set(REQUIRED_COLUMNS).issubset(
+            reader.fieldnames
+        ):
+            raise ValueError(
+                "CSV must contain these columns: "
+                + ", ".join(REQUIRED_COLUMNS)
+            )
+
+        for row in reader:
+            rows_processed += 1
+
+            offer_id = str(row.get("offer_id") or "").strip()
+            normalized_id = offer_id.lower()
+
+            errors = validate_offer(row)
+
+            if normalized_id and normalized_id in seen_ids:
+                errors.append("Duplicate offer_id")
+
+            if normalized_id:
+                seen_ids.add(normalized_id)
+
+            if errors:
+                row["errors"] = "; ".join(errors)
+                rejected_offers.append(row)
+                continue
+
+            duplicate_key = create_duplicate_key(row)
+
+            if duplicate_key in seen_offers:
+                row["errors"] = "Duplicate commercial offer"
+                rejected_offers.append(row)
+                continue
+
+            seen_offers.add(duplicate_key)
+            valid_offers.append(row)
+
+    write_csv(valid_file, valid_offers, REQUIRED_COLUMNS)
+    write_csv(
+        rejected_file,
+        rejected_offers,
+        REQUIRED_COLUMNS + ["errors"],
+    )
+
+    print("\n--- Pipeline Summary ---")
+    print(f"Rows processed: {rows_processed}")
+    print(f"Valid offers: {len(valid_offers)}")
+    print(f"Rejected offers: {len(rejected_offers)}")
+    print(f"Clean data saved to: {valid_file}")
+    print(f"Rejected data saved to: {rejected_file}")
+    print("Pipeline completed successfully!")
+
     """Read, validate, deduplicate, and export supplier offers."""
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
