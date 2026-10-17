@@ -1,50 +1,83 @@
 
-import csv
-
 import pytest
-from fastapi.testclient import TestClient
 
-from src.api import app
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
+
 import src.api as api_module
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    """Create a test client with its own sample CSV."""
+def client(monkeypatch):
+    """Create an isolated test database and API client."""
 
-    test_csv = tmp_path / "valid_offers.csv"
+    test_engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
-    rows = [
-        {
-            "offer_id": "OFF001",
-            "provider": "TravelConnect",
-            "country": "Japan",
-            "data_gb": "5",
-            "validity_days": "7",
-            "price_eur": "8.99",
-        },
-        {
-            "offer_id": "OFF002",
-            "provider": "GlobeLink",
-            "country": "France",
-            "data_gb": "10",
-            "validity_days": "30",
-            "price_eur": "12.50",
-        },
-    ]
+    # Create the test table.
+    with test_engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE offers (
+                offer_id VARCHAR(50) PRIMARY KEY,
+                provider VARCHAR(100) NOT NULL,
+                country VARCHAR(100) NOT NULL,
+                data_gb FLOAT NOT NULL,
+                validity_days INTEGER NOT NULL,
+                price_eur NUMERIC(10, 2) NOT NULL
+            )
+        """))
 
-    with test_csv.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=list(rows[0].keys()),
+        # Insert sample offers.
+        connection.execute(
+            text("""
+                INSERT INTO offers (
+                    offer_id,
+                    provider,
+                    country,
+                    data_gb,
+                    validity_days,
+                    price_eur
+                )
+                VALUES (
+                    :offer_id,
+                    :provider,
+                    :country,
+                    :data_gb,
+                    :validity_days,
+                    :price_eur
+                )
+            """),
+            [
+                {
+                    "offer_id": "OFF001",
+                    "provider": "TravelConnect",
+                    "country": "Japan",
+                    "data_gb": 5,
+                    "validity_days": 7,
+                    "price_eur": 8.99,
+                },
+                {
+                    "offer_id": "OFF002",
+                    "provider": "GlobeLink",
+                    "country": "France",
+                    "data_gb": 10,
+                    "validity_days": 30,
+                    "price_eur": 12.50,
+                },
+            ],
         )
-        writer.writeheader()
-        writer.writerows(rows)
 
-    # Make the API use our temporary test CSV.
-    monkeypatch.setattr(api_module, "VALID_FILE", test_csv)
+    # Replace the real PostgreSQL engine with the test engine.
+    monkeypatch.setattr(api_module, "engine", test_engine)
 
-    return TestClient(app)
+    with TestClient(api_module.app) as test_client:
+        yield test_client
+
+    test_engine.dispose()
 
 
 def test_health_endpoint(client):
@@ -58,7 +91,10 @@ def test_get_all_offers(client):
     response = client.get("/offers")
 
     assert response.status_code == 200
-    assert len(response.json()) == 2
+
+    offers = response.json()
+    assert len(offers) == 2
+    assert offers[0]["offer_id"] == "OFF001"
 
 
 def test_filter_offers_by_country(client):
@@ -83,11 +119,20 @@ def test_unknown_country_returns_empty_list(client):
     assert response.json() == []
 
 
-def test_missing_csv_returns_503(client, tmp_path, monkeypatch):
-    missing_file = tmp_path / "missing.csv"
-    monkeypatch.setattr(api_module, "VALID_FILE", missing_file)
+def test_empty_country_parameter_is_rejected(client):
+    response = client.get("/offers?country=")
 
-    response = client.get("/offers")
+    assert response.status_code == 422
 
-    assert response.status_code == 503
-    assert "unavailable" in response.json()["detail"].lower()
+def test_get_offer_by_id(client):
+    response = client.get("/offers/OFF001")
+
+    assert response.status_code == 200
+    assert response.json()["offer_id"] == "OFF001"
+
+
+def test_get_unknown_offer_returns_404(client):
+    response = client.get("/offers/UNKNOWN")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Offer not found."
