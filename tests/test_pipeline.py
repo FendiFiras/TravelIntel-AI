@@ -35,7 +35,7 @@ def test_negative_price_is_rejected():
 
     errors = validate_offer(offer)
 
-    assert "price_eur must be greater than zero" in errors
+    assert "price_eur must be a finite number greater than zero" in errors
 
 
 def test_zero_data_allowance_is_rejected():
@@ -43,7 +43,8 @@ def test_zero_data_allowance_is_rejected():
 
     errors = validate_offer(offer)
 
-    assert "data_gb must be greater than zero" in errors
+
+    assert "data_gb must be a finite number greater than zero" in errors
 
 
 def test_zero_validity_is_rejected():
@@ -66,3 +67,35 @@ def test_different_prices_have_different_keys():
     second = make_offer(price_eur="9.99")
 
     assert create_duplicate_key(first) != create_duplicate_key(second)
+
+
+def test_nan_price_is_rejected():
+    offer = make_offer(price_eur="nan")
+
+    errors = validate_offer(offer)
+
+    assert "price_eur must be a finite number greater than zero" in errors
+
+
+def test_infinite_data_allowance_is_rejected():
+    offer = make_offer(data_gb="inf")
+
+    errors = validate_offer(offer)
+
+    assert "data_gb must be a finite number greater than zero" in errors
+
+
+def test_missing_country_value_does_not_crash():
+    offer = make_offer(country=None)
+
+    errors = validate_offer(offer)
+
+    assert "Missing required field: country" in errors
+
+
+def test_validity_must_be_a_whole_number():
+    offer = make_offer(validity_days="7.5")
+
+    errors = validate_offer(offer)
+
+    assert "validity_days must be a valid integer" in errors
