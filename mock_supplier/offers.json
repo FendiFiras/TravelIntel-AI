@@ -1,0 +1,27 @@
+
+[
+  {
+    "offer_id": "SUP001",
+    "provider": "GlobalConnect",
+    "country": "Japan",
+    "data_gb": 15,
+    "validity_days": 30,
+    "price_eur": 18.99
+  },
+  {
+    "offer_id": "SUP002",
+    "provider": "GlobalConnect",
+    "country": "France",
+    "data_gb": 20,
+    "validity_days": 30,
+    "price_eur": 17.50
+  },
+  {
+    "offer_id": "SUP003",
+    "provider": "TravelNet",
+    "country": "United States",
+    "data_gb": 10,
+    "validity_days": 15,
+    "price_eur": 19.90
+  }
+]

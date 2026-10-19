@@ -1,28 +1,34 @@
 
-from decimal import Decimal
+import os
+import hmac
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from decimal import Decimal
+from typing import Annotated
+from src.logger import logger
+from fastapi import FastAPI, HTTPException, Query, Header
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.database import engine
+from src.pipeline import run_pipeline
+from src.import_offers import import_offers
 
 
-# --------------------------------------------
-# 1. Create the API application
-# --------------------------------------------
+# ============================================
+# 1. FASTAPI APPLICATION
+# ============================================
 
 app = FastAPI(
     title="TravelIntel AI API",
-    description="API for retrieving validated eSIM offers.",
-    version="1.1.0",
+    description="API for managing validated eSIM offers.",
+    version="1.2.0",
 )
 
 
-# --------------------------------------------
-# 2. Define the response model
-# --------------------------------------------
+# ============================================
+# 2. PYDANTIC MODELS
+# ============================================
 
 class Offer(BaseModel):
     offer_id: str
@@ -33,26 +39,56 @@ class Offer(BaseModel):
     price_eur: Decimal
 
 
-# --------------------------------------------
-# 3. Health endpoint
-# --------------------------------------------
+class SupplierOffer(BaseModel):
+    offer_id: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    country: str = Field(min_length=1)
+    data_gb: float = Field(gt=0, allow_inf_nan=False)
+    validity_days: int = Field(gt=0, strict=True)
+    price_eur: Decimal = Field(gt=0, allow_inf_nan=False)
+
+
+# ============================================
+# 3. AUTHENTICATION HELPER
+# ============================================
+
+def verify_import_api_key(api_key: str | None):
+    """Verify the API key for protected import endpoints."""
+
+    expected_key = os.getenv("IMPORT_API_KEY")
+
+    if not expected_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Import API key is not configured.",
+        )
+
+    if not api_key or not hmac.compare_digest(
+        api_key, expected_key
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key.",
+        )
+
+
+# ============================================
+# 4. HEALTH CHECK
+# ============================================
 
 @app.get("/health")
 def health_check():
-    """Check whether the API is running."""
     return {"status": "ok"}
 
 
-# --------------------------------------------
-# 4. Retrieve offers from PostgreSQL
-# --------------------------------------------
+# ============================================
+# 5. GET ALL OFFERS
+# ============================================
 
 @app.get("/offers", response_model=list[Offer])
 def get_offers(
     country: str | None = Query(default=None, min_length=1)
 ):
-    """Return offers from PostgreSQL, optionally filtered by country."""
-
     sql = """
         SELECT
             offer_id,
@@ -79,12 +115,10 @@ def get_offers(
                 parameters,
             )
 
-            offers = [
+            return [
                 Offer(**dict(row))
                 for row in result.mappings().all()
             ]
-
-            return offers
 
     except SQLAlchemyError as error:
         raise HTTPException(
@@ -93,10 +127,12 @@ def get_offers(
         ) from error
 
 
+# ============================================
+# 6. GET OFFER BY ID
+# ============================================
+
 @app.get("/offers/{offer_id}", response_model=Offer)
 def get_offer_by_id(offer_id: str):
-    """Retrieve one offer by its unique ID."""
-
     try:
         with engine.connect() as connection:
             result = connection.execute(
@@ -129,3 +165,137 @@ def get_offer_by_id(offer_id: str):
             status_code=503,
             detail="Database is currently unavailable.",
         ) from error
+
+
+# ============================================
+# 7. IMPORT EXISTING CSV
+# ============================================
+
+@app.post("/imports/supplier")
+def trigger_supplier_import(
+    x_api_key: Annotated[str | None, Header()] = None,
+):
+    """
+    Run the existing CSV validation pipeline
+    and import valid offers into PostgreSQL.
+    """
+
+    verify_import_api_key(x_api_key)
+
+    try:
+        run_pipeline()
+        imported_count = import_offers()
+
+        return {
+            "status": "success",
+            "imported_offers": imported_count,
+        }
+
+    except (OSError, ValueError, SQLAlchemyError) as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Supplier import failed.",
+        ) from error
+
+
+
+# ============================================
+# 8. IMPORT NEW JSON OFFERS
+# ============================================
+
+@app.post("/offers/import")
+def import_supplier_offers(
+    offers: list[SupplierOffer],
+    x_api_key: Annotated[str | None, Header()] = None,
+):
+    """
+    Accept new supplier offers as JSON,
+    validate them, and insert/update the database.
+    """
+
+    # Step 1: Verify authentication
+    verify_import_api_key(x_api_key)
+
+    # Step 2: Log the start of the import
+    logger.info(
+        "Supplier import started: %s offers received",
+        len(offers),
+    )
+
+    # Step 3: Check that the batch is not empty
+    if not offers:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one offer is required.",
+        )
+
+    # Step 4: Reject duplicate offer IDs
+    offer_ids = [offer.offer_id for offer in offers]
+
+    if len(offer_ids) != len(set(offer_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate offer IDs in request.",
+        )
+
+    # Step 5: Prepare the SQL query
+    sql = text("""
+        INSERT INTO offers (
+            offer_id,
+            provider,
+            country,
+            data_gb,
+            validity_days,
+            price_eur
+        )
+        VALUES (
+            :offer_id,
+            :provider,
+            :country,
+            :data_gb,
+            :validity_days,
+            :price_eur
+        )
+        ON CONFLICT (offer_id)
+        DO UPDATE SET
+            provider = EXCLUDED.provider,
+            country = EXCLUDED.country,
+            data_gb = EXCLUDED.data_gb,
+            validity_days = EXCLUDED.validity_days,
+            price_eur = EXCLUDED.price_eur
+    """)
+
+    # Step 6: Insert or update offers
+    try:
+        with engine.begin() as connection:
+            for offer in offers:
+
+                offer_data = offer.model_dump()
+
+                # Convert Decimal to a DB-compatible value
+                offer_data["price_eur"] = str(offer.price_eur)
+
+                connection.execute(
+                    sql,
+                    offer_data,
+                )
+
+    except SQLAlchemyError as error:
+        logger.exception("Supplier import failed")
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database import failed.",
+        ) from error
+
+    # Step 7: Log successful completion
+    logger.info(
+        "Supplier import completed: %s offers processed",
+        len(offers),
+    )
+
+    # Step 8: Return the API response
+    return {
+        "status": "success",
+        "processed_offers": len(offers),
+    }
