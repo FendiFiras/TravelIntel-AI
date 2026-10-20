@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.database import engine
 from src.pipeline import run_pipeline
 from src.import_offers import import_offers
+from src.recommender import recommend_offers
 
 
 # ============================================
@@ -125,6 +126,48 @@ def get_offers(
             status_code=503,
             detail="Database is currently unavailable.",
         ) from error
+
+
+
+    
+@app.get("/offers/recommend")
+def get_recommendations(
+    country: str = Query(min_length=1),
+    min_data_gb: float = Query(gt=0),
+    trip_days: int = Query(gt=0),
+    max_budget: Decimal = Query(gt=0),
+):
+    # Retrieve existing offers from PostgreSQL
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("""
+                SELECT
+                    offer_id,
+                    provider,
+                    country,
+                    data_gb,
+                    validity_days,
+                    price_eur
+                FROM offers
+            """)
+        ).mappings().all()
+
+    offers = [dict(row) for row in rows]
+
+    # Apply our tested recommendation logic
+    recommendations = recommend_offers(
+        offers=offers,
+        country=country,
+        min_data_gb=min_data_gb,
+        trip_days=trip_days,
+        max_budget=max_budget,
+    )
+
+    return {
+        "country": country,
+        "total_recommendations": len(recommendations),
+        "recommendations": recommendations,
+    }
 
 
 # ============================================
@@ -298,4 +341,45 @@ def import_supplier_offers(
     return {
         "status": "success",
         "processed_offers": len(offers),
+    }
+
+
+
+@app.get("/offers/recommend")
+def get_recommendations(
+    country: str = Query(min_length=1),
+    min_data_gb: float = Query(gt=0),
+    trip_days: int = Query(gt=0),
+    max_budget: Decimal = Query(gt=0),
+):
+    # Retrieve existing offers from PostgreSQL
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("""
+                SELECT
+                    offer_id,
+                    provider,
+                    country,
+                    data_gb,
+                    validity_days,
+                    price_eur
+                FROM offers
+            """)
+        ).mappings().all()
+
+    offers = [dict(row) for row in rows]
+
+    # Apply our tested recommendation logic
+    recommendations = recommend_offers(
+        offers=offers,
+        country=country,
+        min_data_gb=min_data_gb,
+        trip_days=trip_days,
+        max_budget=max_budget,
+    )
+
+    return {
+        "country": country,
+        "total_recommendations": len(recommendations),
+        "recommendations": recommendations,
     }

@@ -1,12 +1,14 @@
-
- {
- "name": "TravelIntel - Dynamic Supplier Ingestion",
+{
+  "name": "TravelIntel - Dynamic Supplier Ingestion",
   "nodes": [
     {
       "parameters": {},
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "id": "6ba904ce-c5ba-47a7-a7b2-8b991b3456cf",
       "name": "When clicking ‘Execute workflow’"
     },
@@ -23,7 +25,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
-      "position": [336, 288],
+      "position": [
+        336,
+        288
+      ],
       "id": "b3fa5561-7781-4ce8-9c6b-55d38a19aaad",
       "name": "HTTP Request",
       "executeOnce": true
@@ -35,7 +40,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
-      "position": [-32, 224],
+      "position": [
+        -32,
+        224
+      ],
       "id": "801e8bb8-7ef4-4dfa-9ea3-2db437d91c20",
       "name": "Fetch Supplier Offers"
     },
@@ -43,27 +51,60 @@
       "parameters": {
         "rule": {
           "interval": [
-            {"triggerAtHour": 9}
+            {
+              "triggerAtHour": 9
+            }
           ]
         }
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.4,
-      "position": [-320, 304],
+      "position": [
+        -320,
+        304
+      ],
       "id": "2f7d9bf1-17e5-4aed-be95-58062cdf596c",
       "name": "Schedule Trigger"
     }
   ],
-  "connections": {
+   "connections": {
     "When clicking ‘Execute workflow’": {
-      "main": [[{"node": "Fetch Supplier Offers", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Fetch Supplier Offers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "HTTP Request": {"main": [[]]},
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
     "Fetch Supplier Offers": {
-      "main": [[{"node": "HTTP Request", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Schedule Trigger": {
-      "main": [[{"node": "Fetch Supplier Offers", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Fetch Supplier Offers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
